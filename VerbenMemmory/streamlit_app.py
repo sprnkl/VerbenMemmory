@@ -76,6 +76,8 @@ TARGETS = [
     ("Meaning (Deutsch)", "meaning"),
 ]
 
+PLACEHOLDER = "— bitte wählen —"
+
 # --------------------
 # State / Rundenlogik
 # --------------------
@@ -91,11 +93,12 @@ def new_round():
     st.session_state.round = {
         "verb": verb,
         "items": items,
-        "matches": {t[1]: None for t in TARGETS},  # target_key -> item_idx
+        "matches": {t[1]: None for t in TARGETS},
         "start": datetime.now(timezone.utc).timestamp(),
         "completed": False,
     }
-    st.session_state.selected_idx = None  # keine Vorauswahl
+    st.session_state.selected_idx = None
+    st.session_state.word_radio = PLACEHOLDER  # Radio auf Platzhalter setzen
 
 # Init
 if "points_total" not in st.session_state:
@@ -104,12 +107,14 @@ if "round" not in st.session_state:
     new_round()
 if "selected_idx" not in st.session_state:
     st.session_state.selected_idx = None
+if "word_radio" not in st.session_state:
+    st.session_state.word_radio = PLACEHOLDER
 
 # --------------------
 # UI
 # --------------------
 st.title("Unregelmäßige Verben – Zuordnen (Tippen statt Ziehen)")
-st.caption("Erst links ein **Wort** wählen, dann rechts das **passende Ziel** antippen. iOS-freundlich, ohne Drag&Drop.")
+st.caption("Links ein **Wort** wählen, rechts das **Ziel** tippen. Nach einem Treffer springt die Auswahl automatisch zurück.")
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -122,6 +127,7 @@ with c2:
 with c3:
     if st.button("❌ Auswahl aufheben"):
         st.session_state.selected_idx = None
+        st.session_state.word_radio = PLACEHOLDER
 
 elapsed = int(time.time() - st.session_state.round["start"])
 st.markdown(f"**Zeit:** {elapsed} Sek.  **Punkte gesamt:** {st.session_state.points_total}")
@@ -131,19 +137,23 @@ left, right = st.columns(2, gap="large")
 # --------- Wörter (stabile Auswahl via Radio) ----------
 with left:
     st.subheader("Wörter")
-    # Sichtbare Items listen
     options = [(idx, it["text"]) for idx, it in enumerate(st.session_state.round["items"]) if not it["hidden"]]
     if options:
-        labels = ["— bitte wählen —"] + [txt for _, txt in options]
+        labels = [PLACEHOLDER] + [txt for _, txt in options]
         indices = [None] + [idx for idx, _ in options]
 
-        # aktuelle Auswahl als Label rekonstruieren
-        if st.session_state.selected_idx is not None and not st.session_state.round["items"][st.session_state.selected_idx]["hidden"]:
-            current_label = st.session_state.round["items"][st.session_state.selected_idx]["text"]
-        else:
-            current_label = "— bitte wählen —"
+        # Falls aktuell gewähltes Wort inzwischen versteckt wurde → zurücksetzen
+        if st.session_state.selected_idx is not None:
+            if st.session_state.round["items"][st.session_state.selected_idx]["hidden"]:
+                st.session_state.selected_idx = None
+                st.session_state.word_radio = PLACEHOLDER
 
-        idx_default = labels.index(current_label) if current_label in labels else 0
+        # Radio gezielt auf den in Session stehenden Wert setzen
+        if st.session_state.word_radio not in labels:
+            st.session_state.word_radio = PLACEHOLDER
+
+        # Index für das Radio bestimmen
+        idx_default = labels.index(st.session_state.word_radio)
         chosen_label = st.radio("Wähle ein Wort", labels, index=idx_default, key="word_radio")
 
         # Auswahl in Index zurückübersetzen
@@ -171,15 +181,16 @@ with right:
             else:
                 item = st.session_state.round["items"][sel_idx]
                 if item["match"] == target_key:
-                    # korrekt → Wort verstecken, Ziel markieren, Auswahl löschen
+                    # korrekt → Wort verstecken, Ziel markieren
                     st.session_state.round["matches"][target_key] = sel_idx
                     st.session_state.round["items"][sel_idx]["hidden"] = True
                     st.session_state.points_total += 1
+                    # WICHTIG: Auswahl automatisch auf Platzhalter zurücksetzen
                     st.session_state.selected_idx = None
+                    st.session_state.word_radio = PLACEHOLDER
                     st.success("Richtig! ✅")
                 else:
-                    # falsch → Auswahl bleibt bestehen
-                    st.error("Falsch – wähle ein anderes Ziel.")
+                    st.error("Falsch – wähle ein anderes Ziel (Auswahl bleibt).")
 
 # --------- Rundenabschluss ----------
 all_done = all(v is not None for v in st.session_state.round["matches"].values())
