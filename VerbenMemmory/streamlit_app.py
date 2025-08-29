@@ -1,5 +1,5 @@
 # streamlit_app.py
-# Unregelmäßige Verben – Zuordnen (tap-to-match; iOS-freundlich)
+# Unregelmäßige Verben – Zuordnen (tap-to-match; iOS-freundlich, tolerant bei gleichen Formen)
 import random
 import time
 from datetime import datetime, timezone
@@ -79,6 +79,21 @@ TARGETS = [
 PLACEHOLDER = "— bitte wählen —"
 
 # --------------------
+# Normalisierung & erlaubte Formen
+# --------------------
+def _norm(s: str) -> str:
+    return s.strip().lower()
+
+def allowed_forms(target_key: str, verb: dict) -> set[str]:
+    """Erlaubte Schreibungen für das Ziel-Feld (inkl. Slash-Varianten wie was/were, got/gotten)."""
+    raw = verb[target_key]
+    forms = [raw]
+    if "/" in raw:
+        forms += [p.strip() for p in raw.split("/")]
+    # optional: weitere Normalisierungen könnten hier ergänzt werden
+    return {_norm(x) for x in forms}
+
+# --------------------
 # State / Rundenlogik
 # --------------------
 def new_round():
@@ -98,7 +113,6 @@ def new_round():
         "completed": False,
     }
     st.session_state.selected_idx = None
-    # Radio-Zustand für sauberen Start löschen
     if "word_radio" in st.session_state:
         del st.session_state["word_radio"]
 
@@ -114,7 +128,7 @@ if "selected_idx" not in st.session_state:
 # UI
 # --------------------
 st.title("Unregelmäßige Verben – Zuordnen (Tippen statt Ziehen)")
-st.caption("Links ein **Wort** wählen, rechts das **Ziel** tippen. Nach einem Treffer springt die Auswahl automatisch zurück.")
+st.caption("Links ein **Wort** wählen, rechts das **Ziel** tippen. Gleiche Formen (z. B. sat/sat) werden tolerant akzeptiert.")
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -146,22 +160,19 @@ with left:
         labels = [PLACEHOLDER] + [txt for _, txt in options]
         indices = [None] + [idx for idx, _ in options]
 
-        # Falls aktuell gewähltes Wort inzwischen versteckt wurde → zurücksetzen
+        # Falls aktuelle Auswahl schon versteckt wurde → zurücksetzen
         if st.session_state.selected_idx is not None:
             if st.session_state.round["items"][st.session_state.selected_idx]["hidden"]:
                 st.session_state.selected_idx = None
                 if "word_radio" in st.session_state:
                     del st.session_state["word_radio"]
 
-        # Radio rendern:
-        # - Wenn schon ein Wert gespeichert ist und noch gültig ist → nutzt Streamlit den automatisch.
-        # - Sonst setzen wir index=0 (= PLACEHOLDER).
+        # Radio rendern (Platzhalter = index 0)
         if "word_radio" in st.session_state and st.session_state["word_radio"] in labels:
             chosen_label = st.radio("Wähle ein Wort", labels, key="word_radio")
         else:
             chosen_label = st.radio("Wähle ein Wort", labels, index=0, key="word_radio")
 
-        # Auswahl in Index zurückübersetzen
         st.session_state.selected_idx = indices[labels.index(chosen_label)]
         if st.session_state.selected_idx is not None:
             st.info(f"Ausgewählt: **{chosen_label}**")
@@ -185,17 +196,18 @@ with right:
                 st.warning("Bitte erst links ein Wort auswählen.")
             else:
                 item = st.session_state.round["items"][sel_idx]
-                if item["match"] == target_key:
-                    # korrekt → Wort verstecken, Ziel markieren
+                # TOLERANTES MATCHING: Text gehört zu einer der erlaubten Formen dieses Ziel-Feldes
+                allowed = allowed_forms(target_key, st.session_state.round["verb"])
+                if _norm(item["text"]) in allowed:
+                    # korrekt → Wort verstecken, Ziel markieren, Auswahl zurücksetzen
                     st.session_state.round["matches"][target_key] = sel_idx
                     st.session_state.round["items"][sel_idx]["hidden"] = True
                     st.session_state.points_total += 1
-                    # Auswahl clean zurücksetzen: Radio-State löschen und sofort neu rendern
                     st.session_state.selected_idx = None
                     if "word_radio" in st.session_state:
                         del st.session_state["word_radio"]
                     st.success("Richtig! ✅")
-                    st.rerun()  # UI springt sofort zurück auf PLACEHOLDER
+                    st.rerun()
                 else:
                     st.error("Falsch – wähle ein anderes Ziel (Auswahl bleibt).")
 
