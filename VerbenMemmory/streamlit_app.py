@@ -187,5 +187,5 @@ if all_done and not st.session_state.round["completed"]:
         st.experimental_rerun()
 
 # Leichter Auto-Refresh für Timer (1s)
-st.experimental_rerun  # reference to avoid lint warnings
 st.session_state._ = st_autorefresh
+
