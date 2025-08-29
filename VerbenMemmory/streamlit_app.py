@@ -98,7 +98,9 @@ def new_round():
         "completed": False,
     }
     st.session_state.selected_idx = None
-    st.session_state.word_radio = PLACEHOLDER  # Radio auf Platzhalter setzen
+    # Radio-Zustand für sauberen Start löschen
+    if "word_radio" in st.session_state:
+        del st.session_state["word_radio"]
 
 # Init
 if "points_total" not in st.session_state:
@@ -107,8 +109,6 @@ if "round" not in st.session_state:
     new_round()
 if "selected_idx" not in st.session_state:
     st.session_state.selected_idx = None
-if "word_radio" not in st.session_state:
-    st.session_state.word_radio = PLACEHOLDER
 
 # --------------------
 # UI
@@ -120,14 +120,18 @@ c1, c2, c3 = st.columns(3)
 with c1:
     if st.button("🔁 Runde neu starten"):
         new_round()
+        st.rerun()
 with c2:
     if st.button("🧹 Punkte zurücksetzen"):
         st.session_state.points_total = 0
         new_round()
+        st.rerun()
 with c3:
     if st.button("❌ Auswahl aufheben"):
         st.session_state.selected_idx = None
-        st.session_state.word_radio = PLACEHOLDER
+        if "word_radio" in st.session_state:
+            del st.session_state["word_radio"]
+        st.rerun()
 
 elapsed = int(time.time() - st.session_state.round["start"])
 st.markdown(f"**Zeit:** {elapsed} Sek.  **Punkte gesamt:** {st.session_state.points_total}")
@@ -146,15 +150,16 @@ with left:
         if st.session_state.selected_idx is not None:
             if st.session_state.round["items"][st.session_state.selected_idx]["hidden"]:
                 st.session_state.selected_idx = None
-                st.session_state.word_radio = PLACEHOLDER
+                if "word_radio" in st.session_state:
+                    del st.session_state["word_radio"]
 
-        # Radio gezielt auf den in Session stehenden Wert setzen
-        if st.session_state.word_radio not in labels:
-            st.session_state.word_radio = PLACEHOLDER
-
-        # Index für das Radio bestimmen
-        idx_default = labels.index(st.session_state.word_radio)
-        chosen_label = st.radio("Wähle ein Wort", labels, index=idx_default, key="word_radio")
+        # Radio rendern:
+        # - Wenn schon ein Wert gespeichert ist und noch gültig ist → nutzt Streamlit den automatisch.
+        # - Sonst setzen wir index=0 (= PLACEHOLDER).
+        if "word_radio" in st.session_state and st.session_state["word_radio"] in labels:
+            chosen_label = st.radio("Wähle ein Wort", labels, key="word_radio")
+        else:
+            chosen_label = st.radio("Wähle ein Wort", labels, index=0, key="word_radio")
 
         # Auswahl in Index zurückübersetzen
         st.session_state.selected_idx = indices[labels.index(chosen_label)]
@@ -185,10 +190,12 @@ with right:
                     st.session_state.round["matches"][target_key] = sel_idx
                     st.session_state.round["items"][sel_idx]["hidden"] = True
                     st.session_state.points_total += 1
-                    # WICHTIG: Auswahl automatisch auf Platzhalter zurücksetzen
+                    # Auswahl clean zurücksetzen: Radio-State löschen und sofort neu rendern
                     st.session_state.selected_idx = None
-                    st.session_state.word_radio = PLACEHOLDER
+                    if "word_radio" in st.session_state:
+                        del st.session_state["word_radio"]
                     st.success("Richtig! ✅")
+                    st.rerun()  # UI springt sofort zurück auf PLACEHOLDER
                 else:
                     st.error("Falsch – wähle ein anderes Ziel (Auswahl bleibt).")
 
@@ -198,4 +205,6 @@ if all_done and not st.session_state.round["completed"]:
     st.session_state.round["completed"] = True
     total_time = int(time.time() - st.session_state.round["start"])
     st.success(f"Geschafft! Zeit: {total_time} Sek.")
-    st.button("Nächste Runde starten", on_click=new_round)
+    if st.button("Nächste Runde starten"):
+        new_round()
+        st.rerun()
