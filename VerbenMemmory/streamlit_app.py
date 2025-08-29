@@ -1,3 +1,5 @@
+# streamlit_app.py
+# Unregelmäßige Verben – Zuordnen (tap-to-match; iOS-freundlich)
 import random
 import time
 from datetime import datetime, timezone
@@ -6,7 +8,7 @@ import streamlit as st
 st.set_page_config(page_title="Unregelmäßige Verben – Zuordnen", page_icon="📚", layout="centered")
 
 # --------------------
-# Daten
+# Daten (vollständig)
 # --------------------
 VERBS = [
     {"infinitive": "be", "pastSimple": "was/were", "pastParticiple": "been", "meaning": "sein"},
@@ -71,11 +73,11 @@ TARGETS = [
     ("Infinitive", "infinitive"),
     ("Past Simple", "pastSimple"),
     ("Past Participle", "pastParticiple"),
-    ("Meaning (Deutsch)", "meaning")
+    ("Meaning (Deutsch)", "meaning"),
 ]
 
 # --------------------
-# State initialisieren
+# State / Rundenlogik
 # --------------------
 def new_round():
     verb = random.choice(VERBS)
@@ -92,100 +94,97 @@ def new_round():
         "matches": {t[1]: None for t in TARGETS},  # target_key -> item_idx
         "start": datetime.now(timezone.utc).timestamp(),
         "completed": False,
-        "click_buffer": {"item_idx": None}  # zuerst Item klicken, dann Ziel
     }
+    st.session_state.selected_idx = None  # keine Vorauswahl
 
+# Init
 if "points_total" not in st.session_state:
     st.session_state.points_total = 0
 if "round" not in st.session_state:
     new_round()
+if "selected_idx" not in st.session_state:
+    st.session_state.selected_idx = None
 
 # --------------------
 # UI
 # --------------------
 st.title("Unregelmäßige Verben – Zuordnen (Tippen statt Ziehen)")
-st.caption("iOS-freundlich: Erst auf **Wort** tippen, dann auf **Ziel** tippen.")
+st.caption("Erst links ein **Wort** wählen, dann rechts das **passende Ziel** antippen. iOS-freundlich, ohne Drag&Drop.")
 
-# Steuerung oben
-cols_top = st.columns(3)
-with cols_top[0]:
-    rounds_select = st.number_input("Runden am Stück", min_value=1, max_value=50, value=1, step=1)
-with cols_top[1]:
+c1, c2, c3 = st.columns(3)
+with c1:
     if st.button("🔁 Runde neu starten"):
         new_round()
-with cols_top[2]:
+with c2:
     if st.button("🧹 Punkte zurücksetzen"):
         st.session_state.points_total = 0
         new_round()
+with c3:
+    if st.button("❌ Auswahl aufheben"):
+        st.session_state.selected_idx = None
 
-# Timer (autorefresh)
-st.experimental_set_query_params()  # neutral
-st_autorefresh = st.empty()
-elapsed_placeholder = st.empty()
-st_autorefresh.text("")  # placeholder
+elapsed = int(time.time() - st.session_state.round["start"])
+st.markdown(f"**Zeit:** {elapsed} Sek.  **Punkte gesamt:** {st.session_state.points_total}")
 
-now_ts = time.time()
-elapsed = int(now_ts - st.session_state.round["start"])
-elapsed_placeholder.markdown(f"**Zeit:** {elapsed} Sek.")
-
-st.markdown(f"**Punkte gesamt:** {st.session_state.points_total}")
-
-# Karten (Items) links
 left, right = st.columns(2, gap="large")
 
+# --------- Wörter (stabile Auswahl via Radio) ----------
 with left:
     st.subheader("Wörter")
-    for idx, it in enumerate(st.session_state.round["items"]):
-        if it["hidden"]:
-            continue
-        pressed = st.button(it["text"], key=f"item_{idx}")
-        if pressed:
-            st.session_state.round["click_buffer"]["item_idx"] = idx
+    # Sichtbare Items listen
+    options = [(idx, it["text"]) for idx, it in enumerate(st.session_state.round["items"]) if not it["hidden"]]
+    if options:
+        labels = ["— bitte wählen —"] + [txt for _, txt in options]
+        indices = [None] + [idx for idx, _ in options]
 
-    selected = st.session_state.round["click_buffer"]["item_idx"]
-    if selected is not None:
-        st.info(f"Ausgewählt: **{st.session_state.round['items'][selected]['text']}** – wähle ein Ziel!")
+        # aktuelle Auswahl als Label rekonstruieren
+        if st.session_state.selected_idx is not None and not st.session_state.round["items"][st.session_state.selected_idx]["hidden"]:
+            current_label = st.session_state.round["items"][st.session_state.selected_idx]["text"]
+        else:
+            current_label = "— bitte wählen —"
 
+        idx_default = labels.index(current_label) if current_label in labels else 0
+        chosen_label = st.radio("Wähle ein Wort", labels, index=idx_default, key="word_radio")
+
+        # Auswahl in Index zurückübersetzen
+        st.session_state.selected_idx = indices[labels.index(chosen_label)]
+        if st.session_state.selected_idx is not None:
+            st.info(f"Ausgewählt: **{chosen_label}**")
+    else:
+        st.write("Alle Wörter sind zugeordnet ✅")
+
+# --------- Ziele (Buttons) ----------
 with right:
     st.subheader("Ziele")
-    # Ziele als Buttons; Klick prüft Zuordnung
     for label, target_key in TARGETS:
-        current = st.session_state.round["matches"][target_key]
-        if current is None:
-            btn = st.button(label, key=f"target_{target_key}")
+        current_match = st.session_state.round["matches"][target_key]
+        if current_match is None:
+            clicked = st.button(label, key=f"target_{target_key}")
         else:
-            # bereits richtig zugeordnet – als disabled anzeigen
-            btn = st.button(f"{label}: ✅ {st.session_state.round['items'][current]['text']}", key=f"target_{target_key}", disabled=True)
+            matched_text = st.session_state.round["items"][current_match]["text"]
+            clicked = st.button(f"{label}: ✅ {matched_text}", key=f"target_{target_key}", disabled=True)
 
-        if btn:
-            sel_idx = st.session_state.round["click_buffer"]["item_idx"]
+        if clicked:
+            sel_idx = st.session_state.selected_idx
             if sel_idx is None:
-                st.warning("Erst ein Wort antippen, dann das Ziel.")
+                st.warning("Bitte erst links ein Wort auswählen.")
             else:
                 item = st.session_state.round["items"][sel_idx]
                 if item["match"] == target_key:
-                    # korrekt
+                    # korrekt → Wort verstecken, Ziel markieren, Auswahl löschen
                     st.session_state.round["matches"][target_key] = sel_idx
                     st.session_state.round["items"][sel_idx]["hidden"] = True
                     st.session_state.points_total += 1
-                    st.session_state.round["click_buffer"]["item_idx"] = None
+                    st.session_state.selected_idx = None
+                    st.success("Richtig! ✅")
                 else:
-                    st.error("Falsch – versuch's noch einmal.")
-                    st.session_state.round["click_buffer"]["item_idx"] = None
+                    # falsch → Auswahl bleibt bestehen
+                    st.error("Falsch – wähle ein anderes Ziel.")
 
-# Abschluss einer Runde
+# --------- Rundenabschluss ----------
 all_done = all(v is not None for v in st.session_state.round["matches"].values())
 if all_done and not st.session_state.round["completed"]:
     st.session_state.round["completed"] = True
     total_time = int(time.time() - st.session_state.round["start"])
     st.success(f"Geschafft! Zeit: {total_time} Sek.")
-    # Nächste Runde?
-    if rounds_select > 1:
-        # Zähler im Query-Param hacken vermeiden – einfach runterzählen
-        # (für einfache Nutzung: eine weitere Runde direkt starten)
-        new_round()
-        st.experimental_rerun()
-
-# Leichter Auto-Refresh für Timer (1s)
-st.session_state._ = st_autorefresh
-
+    st.button("Nächste Runde starten", on_click=new_round)
